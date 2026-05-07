@@ -1,0 +1,594 @@
+{
+    "name": "pl_customer_bronze_to_silver",
+    "properties": {
+        "activities": [
+            {
+                "name": "lk_get_watermark",
+                "type": "Lookup",
+                "dependsOn": [
+                    {
+                        "activity": "log_start",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT last_watermark_value\r\nFROM control_table\r\nWHERE pipeline_name = 'pl_bronze_to_silver_customer'",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "ls_sql_server_tables",
+                        "type": "DatasetReference"
+                    }
+                }
+            },
+            {
+                "name": "sp_load_customers_silver",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "cp_bronze_to_staging",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[sp_merge_customers_silver]",
+                    "storedProcedureParameters": {
+                        "last_watermark": {
+                            "value": {
+                                "value": "@coalesce(activity('lk_get_watermark').output.firstRow.last_watermark_value, '1900-01-01')\n",
+                                "type": "Expression"
+                            },
+                            "type": "Datetime"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azuresynapseanalytics",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "log_start",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[sp_log_pipeline_start]",
+                    "storedProcedureParameters": {
+                        "run_id": {
+                            "value": {
+                                "value": "@pipeline().RunId",
+                                "type": "Expression"
+                            }
+                        },
+                        "pipeline_name": {
+                            "value": "pl_customer_bronze_to_silver"
+                        },
+                        "source_name": {
+                            "value": "customers"
+                        },
+                        "activity_name": {
+                            "value": "log_start"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql_database",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "log_end_success",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "update_watermark",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[sp_log_pipeline_end]",
+                    "storedProcedureParameters": {
+                        "run_id": {
+                            "value": {
+                                "value": "@pipeline().RunId",
+                                "type": "Expression"
+                            },
+                            "type": "String"
+                        },
+                        "status": {
+                            "value": "Success",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql_database",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "update_watermark",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "cp_bronze_to_silver_clean",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    },
+                    {
+                        "activity": "cp_bronze_to_silver_rejected",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[sp_update_watermark]",
+                    "storedProcedureParameters": {
+                        "new_watermark_value": {
+                            "value": {
+                                "value": "@utcNow()",
+                                "type": "Expression"
+                            },
+                            "type": "DateTime"
+                        },
+                        "pipeline_name": {
+                            "value": "pl_customer_bronze_to_silver",
+                            "type": "String"
+                        },
+                        "run_id": {
+                            "value": {
+                                "value": "@pipeline().RunId",
+                                "type": "Expression"
+                            },
+                            "type": "String"
+                        },
+                        "source_name": {
+                            "value": "customers",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql_database",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "log_end_failure",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "sp_load_customers_silver",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    },
+                    {
+                        "activity": "cp_bronze_to_silver_clean",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    },
+                    {
+                        "activity": "cp_bronze_to_silver_rejected",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    },
+                    {
+                        "activity": "log_start",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    },
+                    {
+                        "activity": "lk_get_watermark",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    },
+                    {
+                        "activity": "sc_truncate_stg",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    },
+                    {
+                        "activity": "cp_bronze_to_staging",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[sp_log_pipeline_failure]",
+                    "storedProcedureParameters": {
+                        "error_message": {
+                            "value": "",
+                            "type": "String"
+                        },
+                        "run_id": {
+                            "value": "",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql_database",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "cp_bronze_to_silver_clean",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "sp_load_customers_silver",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlDWSource",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "ParquetWriteSettings"
+                        }
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "mappings": [
+                            {
+                                "source": {
+                                    "name": "customer_id",
+                                    "type": "Int32",
+                                    "physicalType": "int"
+                                },
+                                "sink": {
+                                    "name": "customer_id",
+                                    "type": "Int32",
+                                    "physicalType": "INT_32"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "full_name",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "full_name",
+                                    "type": "String",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "email_address",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "email_address",
+                                    "type": "String",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "city",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "city",
+                                    "type": "String",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "province",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "province",
+                                    "type": "String",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "registration_date",
+                                    "type": "DateTime",
+                                    "physicalType": "datetime"
+                                },
+                                "sink": {
+                                    "name": "registration_date",
+                                    "type": "DateTime",
+                                    "physicalType": "INT_96"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "is_loyalty_member",
+                                    "type": "Boolean",
+                                    "physicalType": "bit"
+                                },
+                                "sink": {
+                                    "name": "is_loyalty_member",
+                                    "type": "Boolean",
+                                    "physicalType": "BOOLEAN"
+                                }
+                            }
+                        ],
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "ds_synapse_silver_final",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "table_name": "customers_silver"
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_parquet_generic",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "p_filename": "customers_silver.parquet",
+                            "p_foldername": "customer/silver_final",
+                            "p_container": "silver"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "cp_bronze_to_silver_rejected",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "sp_load_customers_silver",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlDWSource",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "ParquetWriteSettings"
+                        }
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "ds_synapse_error",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "table_name": "rejected_customers"
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_parquet_generic",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "p_filename": "customers_rejected.parquet",
+                            "p_foldername": "customer/silver_rejected",
+                            "p_container": "silver"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "cp_bronze_to_staging",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "sc_truncate_stg",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "ParquetSource",
+                        "storeSettings": {
+                            "type": "AzureBlobFSReadSettings",
+                            "recursive": true,
+                            "enablePartitionDiscovery": false
+                        },
+                        "formatSettings": {
+                            "type": "ParquetReadSettings"
+                        }
+                    },
+                    "sink": {
+                        "type": "SqlDWSink",
+                        "allowCopyCommand": true
+                    },
+                    "enableStaging": false
+                },
+                "inputs": [
+                    {
+                        "referenceName": "ds_parquet_staging",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "p_foldername": "customers",
+                            "p_container": "bronze"
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_synapse_staging",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "table_name": "customers_bronze_staging"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "sc_truncate_stg",
+                "type": "Script",
+                "dependsOn": [
+                    {
+                        "activity": "lk_get_watermark",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "linkedServiceName": {
+                    "referenceName": "ls_azuresynapseanalytics",
+                    "type": "LinkedServiceReference"
+                },
+                "typeProperties": {
+                    "scripts": [
+                        {
+                            "type": "Query",
+                            "text": "TRUNCATE TABLE dbo.customers_bronze_staging;"
+                        }
+                    ],
+                    "scriptBlockExecutionTimeout": "02:00:00"
+                }
+            }
+        ],
+        "folder": {
+            "name": "pipelines_architecture/bronze_to_silver_pipelines_dedicated_pools"
+        },
+        "annotations": [],
+        "lastPublishTime": "2026-05-02T23:41:30Z"
+    },
+    "type": "Microsoft.DataFactory/factories/pipelines"
+}

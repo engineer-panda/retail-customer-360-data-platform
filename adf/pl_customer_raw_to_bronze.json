@@ -1,0 +1,747 @@
+{
+    "name": "pl_raw_to_bronze_customer",
+    "properties": {
+        "activities": [
+            {
+                "name": "md_check_files",
+                "type": "GetMetadata",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "dataset": {
+                        "referenceName": "ds_csv_generic",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "p_filename": "*",
+                            "p_foldername": {
+                                "value": "@pipeline().parameters.p_folder_name",
+                                "type": "Expression"
+                            },
+                            "p_container": "raw"
+                        }
+                    },
+                    "fieldList": [
+                        "childItems"
+                    ],
+                    "storeSettings": {
+                        "type": "AzureBlobFSReadSettings",
+                        "recursive": true,
+                        "enablePartitionDiscovery": false
+                    },
+                    "formatSettings": {
+                        "type": "DelimitedTextReadSettings"
+                    }
+                }
+            },
+            {
+                "name": "if_no_files",
+                "type": "IfCondition",
+                "dependsOn": [
+                    {
+                        "activity": "md_check_files",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "expression": {
+                        "value": "@equals(length(activity('md_check_files').output.childItems), 0)",
+                        "type": "Expression"
+                    },
+                    "ifFalseActivities": [
+                        {
+                            "name": "lk_check_control",
+                            "type": "Lookup",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "source": {
+                                    "type": "AzureSqlSource",
+                                    "sqlReaderQuery": "SELECT COUNT(1) AS cnt \nFROM control_table \nWHERE pipeline_name = 'pl_bronze_to_silver_customer'",
+                                    "queryTimeout": "02:00:00",
+                                    "partitionOption": "None"
+                                },
+                                "dataset": {
+                                    "referenceName": "ls_sql_server_tables",
+                                    "type": "DatasetReference"
+                                }
+                            }
+                        }
+                    ],
+                    "ifTrueActivities": [
+                        {
+                            "name": "log_no_files",
+                            "type": "Script",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "linkedServiceName": {
+                                "referenceName": "ls_azure_sql_database",
+                                "type": "LinkedServiceReference"
+                            },
+                            "typeProperties": {
+                                "scripts": [
+                                    {
+                                        "type": "Query",
+                                        "text": {
+                                            "value": "@concat(\n'INSERT INTO audit_table (\n    run_id, pipeline_name, source_name, activity_name, status, start_time, end_time\n)\nVALUES (\n    ''', pipeline().RunId, ''',\n    ''pl_raw_to_bronze_customer'',\n    ''', pipeline().parameters.p_folder_name, ''',\n    ''md_check_files'',\n    ''NO_FILES'',\n    GETDATE(),\n    GETDATE()\n)'\n)",
+                                            "type": "Expression"
+                                        }
+                                    }
+                                ],
+                                "scriptBlockExecutionTimeout": "02:00:00"
+                            }
+                        },
+                        {
+                            "name": "wa_send_no_files_email",
+                            "type": "WebActivity",
+                            "dependsOn": [
+                                {
+                                    "activity": "log_no_files",
+                                    "dependencyConditions": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            ],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "method": "POST",
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "url": "https://prod-19.northcentralus.logic.azure.com:443/workflows/b648a9ea9535499c92faba2f129585ef/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=jmaHHgHLwprqmpT9NsyYW1ndR61eoXW6kwlzfWiruq0",
+                                "body": {
+                                    "trigger": "no_files",
+                                    "pipeline": "pl_raw_to_bronze_customer"
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "fe_loop_files",
+                "type": "ForEach",
+                "dependsOn": [
+                    {
+                        "activity": "lk_get_watermark",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('md_check_files').output.childItems",
+                        "type": "Expression"
+                    },
+                    "isSequential": true,
+                    "activities": [
+                        {
+                            "name": "lk_check_file_exists",
+                            "type": "Lookup",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "source": {
+                                    "type": "AzureSqlSource",
+                                    "sqlReaderQuery": {
+                                        "value": "@concat(\n'SELECT COUNT(1) AS file_count FROM file_tracking_table WHERE file_name = ''',\nitem().name,\n''' AND layer = ''bronze'''\n)",
+                                        "type": "Expression"
+                                    },
+                                    "queryTimeout": "02:00:00",
+                                    "partitionOption": "None"
+                                },
+                                "dataset": {
+                                    "referenceName": "ls_sql_server_tables",
+                                    "type": "DatasetReference"
+                                },
+                                "firstRowOnly": true
+                            }
+                        },
+                        {
+                            "name": "if_file_not_exists",
+                            "type": "IfCondition",
+                            "dependsOn": [
+                                {
+                                    "activity": "lk_check_file_exists",
+                                    "dependencyConditions": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            ],
+                            "userProperties": [],
+                            "typeProperties": {
+                                "expression": {
+                                    "value": "@equals(activity('lk_check_file_exists').output.firstRow.file_count, 0)",
+                                    "type": "Expression"
+                                },
+                                "ifTrueActivities": [
+                                    {
+                                        "name": "cp_raw_to_bronze",
+                                        "type": "Copy",
+                                        "dependsOn": [],
+                                        "policy": {
+                                            "timeout": "0.12:00:00",
+                                            "retry": 0,
+                                            "retryIntervalInSeconds": 30,
+                                            "secureOutput": false,
+                                            "secureInput": false
+                                        },
+                                        "userProperties": [],
+                                        "typeProperties": {
+                                            "source": {
+                                                "type": "DelimitedTextSource",
+                                                "additionalColumns": [
+                                                    {
+                                                        "name": "ingestion_time",
+                                                        "value": {
+                                                            "value": "@utcNow()",
+                                                            "type": "Expression"
+                                                        }
+                                                    }
+                                                ],
+                                                "storeSettings": {
+                                                    "type": "AzureBlobFSReadSettings",
+                                                    "recursive": true,
+                                                    "enablePartitionDiscovery": false
+                                                },
+                                                "formatSettings": {
+                                                    "type": "DelimitedTextReadSettings"
+                                                }
+                                            },
+                                            "sink": {
+                                                "type": "ParquetSink",
+                                                "storeSettings": {
+                                                    "type": "AzureBlobFSWriteSettings"
+                                                },
+                                                "formatSettings": {
+                                                    "type": "ParquetWriteSettings"
+                                                }
+                                            },
+                                            "enableStaging": false,
+                                            "translator": {
+                                                "type": "TabularTranslator",
+                                                "mappings": [
+                                                    {
+                                                        "source": {
+                                                            "name": "customer_id",
+                                                            "type": "String",
+                                                            "physicalType": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "customer_id",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    },
+                                                    {
+                                                        "source": {
+                                                            "name": "full_name",
+                                                            "type": "String",
+                                                            "physicalType": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "full_name",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    },
+                                                    {
+                                                        "source": {
+                                                            "name": "email_address",
+                                                            "type": "String",
+                                                            "physicalType": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "email_address",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    },
+                                                    {
+                                                        "source": {
+                                                            "name": "city",
+                                                            "type": "String",
+                                                            "physicalType": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "city",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    },
+                                                    {
+                                                        "source": {
+                                                            "name": "province",
+                                                            "type": "String",
+                                                            "physicalType": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "province",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    },
+                                                    {
+                                                        "source": {
+                                                            "name": "registration_date",
+                                                            "type": "String",
+                                                            "physicalType": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "registration_date",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    },
+                                                    {
+                                                        "source": {
+                                                            "name": "is_loyalty_member",
+                                                            "type": "String",
+                                                            "physicalType": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "is_loyalty_member",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    },
+                                                    {
+                                                        "source": {
+                                                            "name": "ingestion_time",
+                                                            "type": "String"
+                                                        },
+                                                        "sink": {
+                                                            "name": "ingestion_time",
+                                                            "type": "String",
+                                                            "physicalType": "UTF8"
+                                                        }
+                                                    }
+                                                ],
+                                                "typeConversion": true,
+                                                "typeConversionSettings": {
+                                                    "allowDataTruncation": true,
+                                                    "treatBooleanAsNumber": false
+                                                }
+                                            }
+                                        },
+                                        "inputs": [
+                                            {
+                                                "referenceName": "ds_csv_generic",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "p_filename": "@item().name",
+                                                    "p_foldername": {
+                                                        "value": "@pipeline().parameters.p_folder_name",
+                                                        "type": "Expression"
+                                                    },
+                                                    "p_container": "raw"
+                                                }
+                                            }
+                                        ],
+                                        "outputs": [
+                                            {
+                                                "referenceName": "ds_parquet_generic",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "p_filename": "@concat(replace(item().name, '.csv', ''), '.parquet')",
+                                                    "p_foldername": {
+                                                        "value": "@pipeline().parameters.p_folder_name",
+                                                        "type": "Expression"
+                                                    },
+                                                    "p_container": "bronze"
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "sp_insert_file_tracking",
+                                        "type": "Script",
+                                        "dependsOn": [
+                                            {
+                                                "activity": "cp_raw_to_bronze",
+                                                "dependencyConditions": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        ],
+                                        "policy": {
+                                            "timeout": "0.12:00:00",
+                                            "retry": 0,
+                                            "retryIntervalInSeconds": 30,
+                                            "secureOutput": false,
+                                            "secureInput": false
+                                        },
+                                        "userProperties": [],
+                                        "linkedServiceName": {
+                                            "referenceName": "ls_azure_sql_database",
+                                            "type": "LinkedServiceReference"
+                                        },
+                                        "typeProperties": {
+                                            "scripts": [
+                                                {
+                                                    "type": "Query",
+                                                    "text": {
+                                                        "value": "@concat(\n'INSERT INTO file_tracking_table \n(file_name, file_path, layer, processed_flag, file_date, processed_time, run_id)\nVALUES (''',\nitem().name,\n''',''',\npipeline().parameters.p_folder_name,\n'/',\nitem().name,\n''',''bronze'', 1, GETDATE(), GETDATE(), ''',\npipeline().RunId,\n''')'\n)",
+                                                        "type": "Expression"
+                                                    }
+                                                }
+                                            ],
+                                            "scriptBlockExecutionTimeout": "02:00:00"
+                                        }
+                                    },
+                                    {
+                                        "name": "sp_audit_success",
+                                        "type": "Script",
+                                        "dependsOn": [
+                                            {
+                                                "activity": "v_new_files_processed",
+                                                "dependencyConditions": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        ],
+                                        "policy": {
+                                            "timeout": "0.12:00:00",
+                                            "retry": 0,
+                                            "retryIntervalInSeconds": 30,
+                                            "secureOutput": false,
+                                            "secureInput": false
+                                        },
+                                        "userProperties": [],
+                                        "linkedServiceName": {
+                                            "referenceName": "ls_azure_sql_database",
+                                            "type": "LinkedServiceReference"
+                                        },
+                                        "typeProperties": {
+                                            "scripts": [
+                                                {
+                                                    "type": "Query",
+                                                    "text": {
+                                                        "value": "@concat(\n'INSERT INTO audit_table (\n    run_id,\n    pipeline_name,\n    source_name,\n    activity_name,\n    start_time,\n    end_time,\n    status,\n    rows_read,\n    rows_written\n)\nVALUES (\n    ''', pipeline().RunId, ''',\n    ''pl_raw_to_bronze_customer'',\n    ''', pipeline().parameters.p_folder_name, ''',\n    ''cp_raw_to_bronze'',\n    GETDATE(),\n    GETDATE(),\n    ''SUCCESS'',\n    0,\n    0\n)'\n)",
+                                                        "type": "Expression"
+                                                    }
+                                                }
+                                            ],
+                                            "scriptBlockExecutionTimeout": "02:00:00"
+                                        }
+                                    },
+                                    {
+                                        "name": "sp_log_error",
+                                        "type": "Script",
+                                        "dependsOn": [
+                                            {
+                                                "activity": "cp_raw_to_bronze",
+                                                "dependencyConditions": [
+                                                    "Failed"
+                                                ]
+                                            }
+                                        ],
+                                        "policy": {
+                                            "timeout": "0.12:00:00",
+                                            "retry": 0,
+                                            "retryIntervalInSeconds": 30,
+                                            "secureOutput": false,
+                                            "secureInput": false
+                                        },
+                                        "userProperties": [],
+                                        "linkedServiceName": {
+                                            "referenceName": "ls_azure_sql_database",
+                                            "type": "LinkedServiceReference"
+                                        },
+                                        "typeProperties": {
+                                            "scripts": [
+                                                {
+                                                    "type": "Query",
+                                                    "text": {
+                                                        "value": "@concat(\n'INSERT INTO error_table (\n    run_id,\n    pipeline_name,\n    source_name,\n    activity_name,\n    error_time,\n    error_type,\n    error_message\n)\nVALUES (\n    ''', pipeline().RunId, ''',\n    ''pl_raw_to_bronze_customer'',\n    ''', pipeline().parameters.p_folder_name, ''',\n    ''cp_raw_to_bronze'',\n    GETDATE(),\n    ''COPY_ERROR'',\n    ''', activity('cp_raw_to_bronze').error.message, '''\n)'\n)",
+                                                        "type": "Expression"
+                                                    }
+                                                }
+                                            ],
+                                            "scriptBlockExecutionTimeout": "02:00:00"
+                                        }
+                                    },
+                                    {
+                                        "name": "v_new_files_processed",
+                                        "type": "SetVariable",
+                                        "dependsOn": [
+                                            {
+                                                "activity": "sp_insert_file_tracking",
+                                                "dependencyConditions": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        ],
+                                        "policy": {
+                                            "secureOutput": false,
+                                            "secureInput": false
+                                        },
+                                        "userProperties": [],
+                                        "typeProperties": {
+                                            "variableName": "v_new_files_processed",
+                                            "value": 1
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "if_control_not_exists",
+                "type": "IfCondition",
+                "dependsOn": [
+                    {
+                        "activity": "if_no_files",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "expression": {
+                        "value": "@equals(activity('lk_check_control').output.firstRow.cnt, 0)",
+                        "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                        {
+                            "name": "sp_insert_control_init",
+                            "type": "Script",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "linkedServiceName": {
+                                "referenceName": "ls_azure_sql_database",
+                                "type": "LinkedServiceReference"
+                            },
+                            "typeProperties": {
+                                "scripts": [
+                                    {
+                                        "type": "Query",
+                                        "text": {
+                                            "value": "INSERT INTO control_table (\n    pipeline_name,\n    source_name,\n    last_watermark_value,\n    current_watermark_value,\n    load_type,\n    status,\n    last_run_time,\n    run_id\n)\nVALUES (\n    'pl_bronze_to_silver_customer',\n    '@{pipeline().parameters.p_folder_name}',\n    '2000-01-01',\n    '2000-01-01',\n    'incremental',\n    'INIT',\n    GETDATE(),\n    '@{pipeline().RunId}'\n);",
+                                            "type": "Expression"
+                                        }
+                                    }
+                                ],
+                                "scriptBlockExecutionTimeout": "02:00:00"
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "lk_get_watermark",
+                "type": "Lookup",
+                "dependsOn": [
+                    {
+                        "activity": "if_control_not_exists",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT last_watermark_value \nFROM control_table \nWHERE pipeline_name = 'pl_bronze_to_silver_customer'",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "ls_sql_server_tables",
+                        "type": "DatasetReference"
+                    }
+                }
+            },
+            {
+                "name": "if_no_new_files",
+                "type": "IfCondition",
+                "dependsOn": [
+                    {
+                        "activity": "fe_loop_files",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "expression": {
+                        "value": "@equals(variables('v_new_files_processed'), 0)",
+                        "type": "Expression"
+                    },
+                    "ifFalseActivities": [
+                        {
+                            "name": "sp_update_watermark",
+                            "type": "Script",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "linkedServiceName": {
+                                "referenceName": "ls_azure_sql_database",
+                                "type": "LinkedServiceReference"
+                            },
+                            "typeProperties": {
+                                "scripts": [
+                                    {
+                                        "type": "Query",
+                                        "text": {
+                                            "value": "@concat(\n'UPDATE control_table\nSET last_watermark_value = current_watermark_value,\n    current_watermark_value = GETDATE(),\n    last_run_time = GETDATE(),\n    run_id = ''',\npipeline().RunId,\n'''\nWHERE pipeline_name = ''pl_bronze_to_silver_customer'';'\n)",
+                                            "type": "Expression"
+                                        }
+                                    }
+                                ],
+                                "scriptBlockExecutionTimeout": "02:00:00"
+                            }
+                        }
+                    ],
+                    "ifTrueActivities": [
+                        {
+                            "name": "log_no_new_files",
+                            "type": "Script",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "linkedServiceName": {
+                                "referenceName": "ls_azure_sql_database",
+                                "type": "LinkedServiceReference"
+                            },
+                            "typeProperties": {
+                                "scripts": [
+                                    {
+                                        "type": "Query",
+                                        "text": {
+                                            "value": "@concat(\n'INSERT INTO audit_table (\n    pipeline_name,\n    source_name,\n    activity_name,\n    start_time,\n    end_time,\n    status\n)\nVALUES (\n    ''pl_raw_to_bronze_customer'',\n    ''', pipeline().parameters.p_folder_name, ''',\n    ''fe_loop_files'',\n    GETDATE(),\n    GETDATE(),\n    ''NO_NEW_FILES''\n)'\n)",
+                                            "type": "Expression"
+                                        }
+                                    }
+                                ],
+                                "scriptBlockExecutionTimeout": "02:00:00"
+                            }
+                        },
+                        {
+                            "name": "wa_send_no_new_files_email",
+                            "type": "WebActivity",
+                            "dependsOn": [
+                                {
+                                    "activity": "log_no_new_files",
+                                    "dependencyConditions": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            ],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "method": "POST",
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "url": "https://prod-19.northcentralus.logic.azure.com:443/workflows/b648a9ea9535499c92faba2f129585ef/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=jmaHHgHLwprqmpT9NsyYW1ndR61eoXW6kwlzfWiruq0",
+                                "body": {
+                                    "trigger": "no_files",
+                                    "pipeline": "pl_raw_to_bronze_customer"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "parameters": {
+            "p_folder_name": {
+                "type": "string",
+                "defaultValue": "customers"
+            }
+        },
+        "variables": {
+            "processed_count": {
+                "type": "String"
+            },
+            "v_new_files_processed": {
+                "type": "Integer",
+                "defaultValue": 0
+            }
+        },
+        "folder": {
+            "name": "pipelines_architecture/raw_to_bronze_pipelines"
+        },
+        "annotations": [],
+        "lastPublishTime": "2026-04-28T02:30:28Z"
+    },
+    "type": "Microsoft.DataFactory/factories/pipelines"
+}

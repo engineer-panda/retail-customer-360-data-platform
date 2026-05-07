@@ -89,4 +89,13 @@ databricks/     -> PySpark notebooks and transformation logic
 architecture/   -> Solution architecture and workflow diagrams
 powerbi/        -> Dashboard files and reporting assets
 screenshots/    -> Pipeline, notebook, and dashboard screenshots
-docs/           -> Additional project documentation
+documentation/           -> Additional project documentation
+```
+
+## Architecture Diagram
+
+![Architecture Diagram](architecture/architecture.jpg)
+
+## Project Documentation
+
+[Download Full Project Documentation](docs/retail_customer_360_project_documentation.pdf)

@@ -66,3 +66,23 @@ Built an end-to-end Azure Retail Customer 360 Data Platform using Azure Data Fac
 
 ## Audit Monitoring Table
 ![Audit](screenshots/audit_table.png)
+
+# Power BI Dashboard Visualizations
+
+## Sales Distribution by Province
+![Sales Distribution](powerbi/sales_distribution_by_province.png)
+
+---
+
+## Top Customers
+![Top Customers](powerbi/top_customers.png)
+
+---
+
+## Top Stores
+![Top Stores](powerbi/top_stores.png)
+
+---
+
+## Yearly Sales Trends
+![Yearly Sales](powerbi/yearly_sales.png)

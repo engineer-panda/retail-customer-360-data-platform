@@ -6,7 +6,7 @@ Built an end-to-end Azure Retail Customer 360 Data Platform using Azure Data Fac
 
 # Architecture Diagram
 
-![Architecture](architecture/architecture.jpg)
+![Architecture](architecture/architecture.png)
 
 ---
 
